@@ -1821,7 +1821,6 @@ x   multiplication
                 import os
                 import random
 
-                # We gebruiken nu jouw centrale config.json bestand
                 config_file = "config.json"
 
                 GREEN = "\033[92m"
@@ -1830,45 +1829,45 @@ x   multiplication
                 CYAN = "\033[96m"
                 RESET = "\033[0m"
 
-                # 1. LAAD OF INITIALISEER DE CENTRALE CONFIG.JSON
+                # 1. LAAD CENTRALE CONFIG
                 config_data = {}
                 if os.path.exists(config_file):
                     try:
                         with open(config_file, "r") as f:
                             config_data = json.load(f)
                     except json.JSONDecodeError:
-                        # Als config.json corrupt of leeg is, herstellen we de basis dictionary
                         config_data = {}
 
-                # Zorg dat de sleutel voor het trade-systeem bestaat in config.json
                 if "trade_accounts" not in config_data:
                     config_data["trade_accounts"] = {}
 
-                print(f"\n{CYAN}=== CLIOS ASSET MANAGEMENT | INLOGGEN VIA CONFIG ==={RESET}")
-                invoer = input("Voer je IBAN in (bijv. NL74TRIO of een volledige code): ").strip().upper().replace(" ", "")
-                if len(invoer) < 4:
-                    print(f"{RED}[ERROR] Voer tenminste een land- en bankcode in om in te loggen.{RESET}")
-                    continue
-                
-                # Automatisch aanvullen van testcodes
-                if len(invoer) < 18:
-                    hash_cijfers = str(abs(hash(invoer)))[:10].zfill(10)
-                    iban = invoer + hash_cijfers
-                else:
-                    iban = invoer
+                # 2. AUTOMATISCH INLOGGEN LOGICA
+                iban = config_data.get("last_logged_iban", "")
 
-                # 2. CHECK OF DE IBAN BESTAAT BINNEN CONFIG.JSON
+                # Als er nog geen actieve sessie bekend is, vragen we er éénmalig om
+                if not iban:
+                    print(f"\n{CYAN}=== CLIOS ASSET MANAGEMENT | REKENING KOPPELEN ==={RESET}")
+                    invoer = input("Voer je IBAN in (bijv. NL74TRIO): ").strip().upper().replace(" ", "")
+                    if len(invoer) < 4:
+                        print(f"{RED}[ERROR] Ongeldige invoer.{RESET}")
+                        continue
+                    
+                    if len(invoer) < 18:
+                        hash_cijfers = str(abs(hash(invoer)))[:10].zfill(10)
+                        iban = invoer + hash_cijfers
+                    else:
+                        iban = invoer
+
+                # 3. MAAK ACCOUNT AAN ALS DEZE NOG NIET BESTAAT IN CONFIG
                 if iban not in config_data["trade_accounts"]:
-                    print(f"{YELLOW}[CLIOS LEDGER] Rekening {iban} niet gevonden in config.json.{RESET}")
-                    print("Maak direct een nieuw profiel aan binnen de centrale configuratie:")
+                    print(f"{YELLOW}[CLIOS LEDGER] Rekening {iban} configureren...{RESET}")
                     voornaam = input("Voornaam: ").strip()
                     achternaam = input("Achternaam: ").strip()
                     
                     if not voornaam or not achternaam:
-                        print(f"{RED}[ERROR] Naam verplicht. Inloggen afgebroken.{RESET}")
+                        print(f"{RED}[ERROR] Naam verplicht.{RESET}")
                         continue
 
-                    # Maak de nieuwe datastructuur aan voor deze IBAN
                     config_data["trade_accounts"][iban] = {
                         "voornaam": voornaam,
                         "achternaam": achternaam,
@@ -1885,20 +1884,19 @@ x   multiplication
                             {"id": 3, "taak": "Huiswerk maken of lezen (30 min)", "beloning": 5.00, "status": "Open"}
                         ]
                     }
-                    # Schrijf de nieuwe account direct weg naar config.json
-                    with open(config_file, "w") as f:
-                        json.dump(config_data, f, indent=4)
-                    print(f"{GREEN}[SUCCESS] Account geactiveerd en opgeslagen in config.json!{RESET}\n")
 
-                print(f"{GREEN}[SUCCESS] Succesvol ingelogd op rekening {iban}!{RESET}")
+                # Onthoud deze IBAN als de laatst succesvolle login
+                config_data["last_logged_iban"] = iban
+                with open(config_file, "w") as f:
+                    json.dump(config_data, f, indent=4)
 
-                # 3. INTERFACE HOOFDMENU (Leest en schrijft live vanuit config.json)
+                print(f"{GREEN}[SUCCESS] Automatisch ingelogd op rekening {iban}!{RESET}")
+
+                # 4. INTERFACE HOOFDMENU
                 while True:
-                    # Laad de meest recente stand van de config
                     with open(config_file, "r") as f:
                         config_data = json.load(f)
                     
-                    # Haal de specifieke data van dit kind op
                     data = config_data["trade_accounts"][iban]
 
                     current_stock_price = round(random.uniform(535.00, 555.00), 2)
@@ -1918,11 +1916,11 @@ x   multiplication
                     print("═"*55)
                     print(f"  Rekeningnummer : {GREEN}{data['iban']}{RESET} 💳")
                     print(f"  Totaal Waarde  : {CYAN}€{totale_waarde:.2f}{RESET}")
-                    print(f"  ├─ Vrij Saldo  : €{data['vrij_saldo']:.2f} (Direct uit te geven)")
-                    print(f"  ├─ Spaarvarken : 🐷 €{data['spaarvarken']:.2f} (Veilig opgeborgen)")
-                    print(f"  └─ Geïnvesteerd: €{geinvesteerd_display:.2f} (Actuele beurswaarde)")
+                    print(f"  ├─ Vrij Saldo  : €{data['vrij_saldo']:.2f}")
+                    print(f"  ├─ Spaarvarken : 🐷 €{data['spaarvarken']:.2f}")
+                    print(f"  └─ Geïnvesteerd: €{geinvesteerd_display:.2f}")
                     print("─"*55)
-                    print(f"  📊 BRON VAN JOUW INKOMSTEN (ETC):")
+                    print(f"  📊 BRON VAN JOUW INKOMSTEN:")
                     print(f"  ├─ Totaal Gestort   : €{data['totaal_gestort']:.2f}")
                     print(f"  │  ├─ Via Klusjes   : €{klusjes_inkomsten:.2f}")
                     print(f"  │  └─ Via Zakgeld   : €{bonus_inkomsten:.2f}")
@@ -1937,8 +1935,9 @@ x   multiplication
                     print("  2. Geld Verdienen (Klusjes & Taken)")
                     print("  3. Beurs & Marktsimulatie (Live Koersen & Traden)")
                     print("  4. Budgetten & Spaarpotten Beheren (Geld verdelen)")
-                    print("  5. Ouder & Beheerder Instellingen (Direct open 🔓)")
-                    print("  6. Uitloggen (Wisselen van rekening / Terug naar CLIOS)")
+                    print("  5. Ouder & Beheerder Instellingen 🔓")
+                    print("  6. Wisselen van Rekening (Inloggen met andere IBAN)")
+                    print("  7. Afsluiten (Terug naar CLIOS Terminal)")
                     print("═"*55)
                     
                     keuze = input("CLIOS[portfolio] > ").strip()
@@ -1954,30 +1953,26 @@ x   multiplication
                         
                         print(f"\n{CYAN}--- TRANSACTIE DETAILS & RENDEMENT ---{RESET}")
                         if aantal_stuks == 0:
-                            print("  Je bezit nog geen indexfondsen. Koop aandelen bij optie 3 om rendement te zien!")
+                            print("  Je bezit nog geen indexfondsen.")
                         else:
                             winst_verlies = actuele_beleggingswaarde - totale_aankoopwaarde
                             procent = (winst_verlies / totale_aankoopwaarde) * 100 if totale_aankoopwaarde > 0 else 0
                             p_kleur = GREEN if winst_verlies >= 0 else RED
                             p_teken = "+" if winst_verlies >= 0 else ""
-                            
                             print(f"  📈 Fonds: S&P 500 ETF (SPY)")
                             print(f"     Aantal in bezit : {aantal_stuks} stuks")
-                            print(f"     Jouw Gekochte Prijs : €{totale_aankoopwaarde:.2f}")
-                            print(f"     Huidige Waarde nu   : €{actuele_beleggingswaarde:.2f}")
                             print(f"     Beurs Resultaat     : {p_kleur}{p_teken}€{winst_verlies:.2f} ({p_teken}{procent:.2f}%){RESET}")
 
                     elif keuze == "2":
                         print(f"\n{CYAN}--- BESCHIKBARE APPLICATIE TAKEN ---{RESET}")
                         open_taken = [t for t in data["taken"] if t["status"] == "Open"]
                         if not open_taken:
-                            print("  Er zijn op dit moment geen openstaande klusjes. Vraag je ouders om er een toe te voegen!")
+                            print("  Er zijn op dit moment geen openstaande klusjes.")
                         else:
                             for t in open_taken:
                                 print(f"  [{t['id']}] {t['taak']} -> {GREEN}€{t['beloning']:.2f}{RESET}")
-                        
                         try:
-                            klaar_id = input("\nVoer het nummer in van de voltooide taak (Enter = annuleren): ").strip()
+                            klaar_id = input("\nVoer het nummer in van de voltooide taak: ").strip()
                             if klaar_id:
                                 kid = int(klaar_id)
                                 for t in data["taken"]:
@@ -1985,175 +1980,123 @@ x   multiplication
                                         t["status"] = "Uitbetaald"
                                         data["vrij_saldo"] += t["beloning"]
                                         data["totaal_gestort"] += t["beloning"]
-                                        data["transacties"].append({
-                                            "omschrijving": f"Taak voltooid: {t['taak']}",
-                                            "bedrag": t["beloning"],
-                                            "type": "credit"
-                                        })
-                                        # Synchroniseer terug naar de hoofdconfig en sla op
+                                        data["transacties"].append({"omschrijving": f"Taak voltooid: {t['taak']}", "bedrag": t["beloning"], "type": "credit"})
                                         config_data["trade_accounts"][iban] = data
                                         with open(config_file, "w") as f: json.dump(config_data, f, indent=4)
-                                        print(f"{GREEN}[SUCCESS] €{t['beloning']:.2f} gestort op je Vrije Saldo!{RESET}")
-                        except (ValueError, IndexError):
-                            print(f"{RED}[ERROR] Ongeldige taak.{RESET}")
+                                        print(f"{GREEN}[SUCCESS] €{t['beloning']:.2f} gestort!{RESET}")
+                        except (ValueError, IndexError): pass
 
                     elif keuze == "3":
-                        print(f"\n{CYAN}--- LIVE MARKT INDEX (REALISTISCHE GEGEVENS) ---{RESET}")
+                        print(f"\n{CYAN}--- LIVE MARKT INDEX ---{RESET}")
                         stock_name = "S&P 500 ETF (SPY)"
-                        print(f"  Aandeel        : {stock_name}")
-                        print(f"  Actuele Prijs  : {GREEN}€{current_stock_price:.2f}{RESET} per aandeel")
-                        print(f"  Je hebt al     : {aantal_stuks} stuks")
-                        print("─"*55)
-                        print("  1. Aandeel Kopen (Investeren)")
-                        print("  2. Aandeel Verkopen (Winst pakken)")
-                        
+                        print(f"  Actuele Prijs  : {GREEN}€{current_stock_price:.2f}{RESET}")
+                        print("  1. Aandeel Kopen\n  2. Aandeel Verkopen")
                         sub_keuze = input("Keuze > ").strip()
                         if sub_keuze == "1":
                             if data["vrij_saldo"] < current_stock_price:
-                                print(f"{RED}[ERROR] Je hebt €{current_stock_price:.2f} nodig op je Vrije Saldo. Doe eerst een klusje!{RESET}")
+                                print(f"{RED}[ERROR] Te weinig saldo!{RESET}")
                             else:
                                 data["vrij_saldo"] -= current_stock_price
                                 data["portfolio"][stock_name] = {"aantal": aantal_stuks + 1, "aankoopprijs": current_stock_price}
                                 data["transacties"].append({"omschrijving": f"Aankoop {stock_name}", "bedrag": current_stock_price, "type": "debit"})
-                                
                                 config_data["trade_accounts"][iban] = data
                                 with open(config_file, "w") as f: json.dump(config_data, f, indent=4)
-                                print(f"{GREEN}[SUCCESS] 1 aandeel {stock_name} gekocht voor €{current_stock_price:.2f}!{RESET}")
+                                print(f"{GREEN}[SUCCESS] Gekocht!{RESET}")
                         elif sub_keuze == "2":
                             if aantal_stuks > 0:
+                                data["portfolio"][stock_name]["aantal"] -= 1
+                                data["portfolio"][stock_name]["waarde"] -= current_stock_price
                                 data["vrij_saldo"] += current_stock_price
-                                if aantal_stuks - 1 == 0:
-                                    del data["portfolio"][stock_name]
-                                else:
-                                    data["portfolio"][stock_name]["aantal"] -= 1
+                                if data["portfolio"][stock_name]["aantal"] == 0: del data["portfolio"][stock_name]
                                 data["transacties"].append({"omschrijving": f"Verkoop {stock_name}", "bedrag": current_stock_price, "type": "credit"})
-                                
                                 config_data["trade_accounts"][iban] = data
                                 with open(config_file, "w") as f: json.dump(config_data, f, indent=4)
-                                print(f"{YELLOW}[INFO] Aandeel verkocht voor €{current_stock_price:.2f}. Geld terug op Vrij Saldo!{RESET}")
-                            else:
-                                print(f"{RED}[ERROR] Je bezit dit aandeel niet.{RESET}")
-
-                    elif設計 =="4":
-                        pass # Handled below identically for space
+                                print(f"{YELLOW}[INFO] Verkocht!{RESET}")
 
                     elif keuze == "4":
-                        print(f"\n{CYAN}--- ⚙️ BEHEER JOUW SPAARPOTTEN & BUDGETTEN ---{RESET}")
-                        print("  1. Geld in je Spaarvarken 🐷 doen/halen")
-                        print("  2. Nieuw Budget/Doel categorie aanmaken (bijv. Gamen, Speelgoed)")
-                        print("  3. Geld verdelen naar een Budget categorie")
-                        
+                        print(f"\n{CYAN}--- ⚙️ BEHEER POTJES ---{RESET}")
+                        print("  1. Geld in/uit Spaarvarken\n  2. Nieuw Budget\n  3. Geld verdelen")
                         b_keuze = input("Keuze > ").strip()
                         if b_keuze == "1":
-                            print(f"\n Inhoud spaarvarken: {GREEN}€{data['spaarvarken']:.2f}{RESET}")
-                            actie = input("Wil je storten of opnemen uit het spaarvarken?: ").strip().lower()
+                            actie = input("storten/opnemen: ").strip().lower()
                             try:
                                 bedrag = float(input("Bedrag: €"))
-                                if bedrag <= 0: raise ValueError
-                                if actie == "storten" or actie == "1":
-                                    if bedrag > data["vrij_saldo"]:
-                                        print(f"{RED}[ERROR] Te weinig vrij saldo.{RESET}")
-                                    else:
-                                        data["vrij_saldo"] -= bedrag
-                                        data["spaarvarken"] += bedrag
-                                        data["transacties"].append({"omschrijving": "Naar spaarvarken verplaatst", "bedrag": bedrag, "type": "debit"})
-                                        print(f"{GREEN}[SUCCESS] In het spaarvarken gestopt!{RESET}")
-                                elif actie == "opnemen" or actie == "2":
-                                    if bedrag > data["spaarvarken"]:
-                                        print(f"{RED}[ERROR] Zoveel zit er niet in.{RESET}")
-                                    else:
-                                        data["spaarvarken"] -= bedrag
-                                        data["vrij_saldo"] += bedrag
-                                        data["transacties"].append({"omschrijving": "Uit spaarvarken gehaald", "bedrag": bedrag, "type": "credit"})
-                                        print(f"{GREEN}[SUCCESS] Uit het spaarvarken gehaald!{RESET}")
-                                
+                                if actie == "storten" and bedrag <= data["vrij_saldo"]:
+                                    data["vrij_saldo"] -= bedrag
+                                    data["spaarvarken"] += bedrag
+                                    data["transacties"].append({"omschrijving": "Naar spaarvarken", "bedrag": bedrag, "type": "debit"})
+                                elif actie == "opnemen" and bedrag <= data["spaarvarken"]:
+                                    data["spaarvarken"] -= bedrag
+                                    data["vrij_saldo"] += bedrag
+                                    data["transacties"].append({"omschrijving": "Uit spaarvarken", "bedrag": bedrag, "type": "credit"})
                                 config_data["trade_accounts"][iban] = data
                                 with open(config_file, "w") as f: json.dump(config_data, f, indent=4)
-                            except ValueError: print(f"{RED}[ERROR] Ongeldig getal.{RESET}")
-
+                            except ValueError: pass
                         elif b_keuze == "2":
-                            cat_naam = input("Naam van de nieuwe categorie (bijv. Gamen): ").strip()
+                            cat_naam = input("Naam budget: ").strip()
                             if cat_naam:
                                 try:
-                                    doel_bedrag = float(input(f"Hoeveel euro wil je sparen voor {cat_naam}?: €"))
+                                    doel_bedrag = float(input("Doel: €"))
                                     if "budgetten" not in data: data["budgetten"] = {}
                                     data["budgetten"][cat_naam] = {"huidig": 0.0, "doel": doel_bedrag}
-                                    
                                     config_data["trade_accounts"][iban] = data
                                     with open(config_file, "w") as f: json.dump(config_data, f, indent=4)
-                                    print(f"{GREEN}[SUCCESS] Budgetcategorie '{cat_naam}' aangemaakt!{RESET}")
                                 except ValueError: pass
-
                         elif b_keuze == "3":
-                            if not data.get("budgetten"):
-                                print(f"{RED}[ERROR] Maak eerst een categorie aan met optie 2!{RESET}")
-                                continue
-                            print("\nBeschikbare categorieën:")
-                            for c in data["budgetten"]: print(f"  - {c}")
-                            naar_cat = input("Naam van welke categorie wil je aanvullen?: ").strip()
-                            if naar_cat in data["budgetten"]:
+                            for c in data.get("budgetten", {}): print(f"  - {c}")
+                            naar_cat = input("Welke categorie?: ").strip()
+                            if naar_cat in data.get("budgetten", {}):
                                 try:
-                                    bdr = float(input(f"Hoeveel geld wil je vanuit je Vrije Saldo naar '{naar_cat}' schuiven?: €"))
-                                    if bdr > data["vrij_saldo"]:
-                                        print(f"{RED}[ERROR] Je hebt niet genoeg Vrij Saldo!{RESET}")
-                                    else:
+                                    bdr = float(input("Bedrag: €"))
+                                    if bdr <= data["vrij_saldo"]:
                                         data["vrij_saldo"] -= bdr
                                         data["budgetten"][naar_cat]["huidig"] += bdr
-                                        data["transacties"].append({"omschrijving": f"Gereserveerd voor {naar_cat}", "bedrag": bdr, "type": "debit"})
-                                        
+                                        data["transacties"].append({"omschrijving": f"Naar budget {naar_cat}", "bedrag": bdr, "type": "debit"} )
                                         config_data["trade_accounts"][iban] = data
                                         with open(config_file, "w") as f: json.dump(config_data, f, indent=4)
-                                        print(f"{GREEN}[SUCCESS] Geld succesvol gereserveerd!{RESET}")
                                 except ValueError: pass
 
                     elif keuze == "5":
                         while True:
-                            print(f"\n{YELLOW}--- ⚙️ OUDER CONFIGURATIE PANEEL ---{RESET}")
-                            print("  1. Nieuw klusje toevoegen")
-                            print("  2. Bestaand klusje permanent wissen")
-                            print("  3. Extra zakgeld / bonus storten")
-                            print("  4. Terug naar kind-menu")
+                            print(f"\n{YELLOW}--- OUDER CONFIGURATIE ---{RESET}")
+                            print("  1. Nieuw klusje\n  2. Klusje wissen\n  3. Bonus storten\n  4. Terug")
                             admin_keuze = input("CLIOS[admin] > ").strip()
                             if admin_keuze == "1":
-                                taak_naam = input("Naam van het klusje: ").strip()
+                                taak_naam = input("Klusje: ").strip()
                                 if taak_naam:
-                                    try:
-                                        beloning = float(input("Beloning: €"))
-                                        nieuw_id = max([t["id"] for t in data["taken"]], default=0) + 1
-                                        data["taken"].append({"id": nieuw_id, "taak": taak_naam, "beloning": beloning, "status": "Open"})
-                                        
-                                        config_data["trade_accounts"][iban] = data
-                                        with open(config_file, "w") as f: json.dump(config_data, f, indent=4)
-                                        print(f"{GREEN}[SUCCESS] Permanent opgeslagen in config.json!{RESET}")
-                                    except ValueError: pass
-                            elif admin_keuze == "2":
-                                for t in data["taken"]: print(f"  [{t['id']}] {t['taak']} (€{t['beloning']:.2f})")
-                                try:
-                                    del_id = int(input("Verwijder nummer: "))
-                                    data["taken"] = [t for t in data["taken"] if t["id"] != del_id]
-                                    
+                                    beloning = float(input("Beloning: €"))
+                                    nieuw_id = max([t["id"] for t in data["taken"]], default=0) + 1
+                                    data["taken"].append({"id": nieuw_id, "taak": taak_naam, "beloning": beloning, "status": "Open"})
                                     config_data["trade_accounts"][iban] = data
                                     with open(config_file, "w") as f: json.dump(config_data, f, indent=4)
-                                    print(f"{GREEN}[SUCCESS] Klusje gewist uit config.json.{RESET}")
+                            elif admin_keuze == "2":
+                                try:
+                                    del_id = int(input("Verwijder ID: "))
+                                    data["taken"] = [t for t in data["taken"] if t["id"] != del_id]
+                                    config_data["trade_accounts"][iban] = data
+                                    with open(config_file, "w") as f: json.dump(config_data, f, indent=4)
                                 except ValueError: pass
                             elif admin_keuze == "3":
-                                try:
-                                    bonus = float(input("Hoeveelheid bonusgeld: €"))
-                                    reden = input("Reden: ").strip() or "Bonus van ouders"
-                                    data["vrij_saldo"] += bonus
-                                    data["totaal_gestort"] += bonus
-                                    data["transacties"].append({"omschrijving": reden, "bedrag": bonus, "type": "credit"})
-                                    
-                                    config_data["trade_accounts"][iban] = data
-                                    with open(config_file, "w") as f: json.dump(config_data, f, indent=4)
-                                    print(f"{GREEN}[SUCCESS] Bonus verwerkt in config.json!{RESET}")
-                                except ValueError: pass
-                            elif admin_keuze == "4":
-                                break
+                                bonus = float(input("Bonus: €"))
+                                data["vrij_saldo"] += bonus
+                                data["totaal_gestort"] += bonus
+                                data["transacties"].append({"omschrijving": "Bonus van ouders", "bedrag": bonus, "type": "credit"})
+                                config_data["trade_accounts"][iban] = data
+                                with open(config_file, "w") as f: json.dump(config_data, f, indent=4)
+                            elif admin_keuze == "4": break
 
+                    # KEUZE 6: REKENING WISSELEN (Reset 'last_logged_iban')
                     elif keuze == "6":
-                        print("[SYSTEM] Uitloggen en data veilig opgeslagen in config.json...")
+                        config_data["last_logged_iban"] = ""
+                        with open(config_file, "w") as f: json.dump(config_data, f, indent=4)
+                        print(f"{YELLOW}[SYSTEM] Uitgelogd. Start 'trade' opnieuw op om een andere IBAN te kiezen!{RESET}")
                         break
+
+                    elif keuze == "7":
+                        print("[SYSTEM] Terug naar CLIOS Terminal...")
+                        break
+
+
 
             # === PAS ALS ALLERLAATSTE HET GENERIEKE COMMANDO ===
             elif command:
