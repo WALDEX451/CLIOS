@@ -1816,7 +1816,7 @@ x   multiplication
                     print("Reason:", error)
                     print("Back to CLIOS.")
 
-                                elif command:
+            elif command:
                 # Verwijdert onzichtbare spaties/enters voor de Pi
                 clean_command = command.strip()
                 print(f"[SYSTEM] Uitvoeren van Linux commando: {clean_command}...")
@@ -1828,3 +1828,4 @@ x   multiplication
                     print(f"[ERROR] Commando '{clean_command}' bestaat niet.")
                 except Exception as e:
                     print(f"[ERROR] Fout: {e}")
+
