@@ -1815,3 +1815,16 @@ x   multiplication
                     print("[BROWSER] Could not load this page.")
                     print("Reason:", error)
                     print("Back to CLIOS.")
+
+                                elif command:
+                # Verwijdert onzichtbare spaties/enters voor de Pi
+                clean_command = command.strip()
+                print(f"[SYSTEM] Uitvoeren van Linux commando: {clean_command}...")
+                try:
+                    import shlex
+                    parsed_args = shlex.split(clean_command)
+                    subprocess.run(parsed_args)
+                except FileNotFoundError:
+                    print(f"[ERROR] Commando '{clean_command}' bestaat niet.")
+                except Exception as e:
+                    print(f"[ERROR] Fout: {e}")
