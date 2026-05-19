@@ -5,27 +5,38 @@ import sys
 import hashlib
 import subprocess
 import urllib.request
-import re
 import getpass
+import random
+import uuid
+import re
+import json
+import psutil
+import platform
+from datetime import datetime
+import urllib.parse
+import ssl
+from urllib.parse import urlparse, parse_qs, unquote
+
 
 class Kernel:
     def __init__(self, config, version):
-        # 1. EERST de basisgegevens uit de config inladen
-        self.config   = config
-        self.version  = version
+        # 1. Basisgegevens uit config laden
+        self.config = config
+        self.version = version
         self.username = config["username"]
         self.hostname = config["hostname"]
-        self.user_id  = config["user_id"]
-        self.users    = []
-        self.running  = False
-        self.devices  = {}
+        self.user_id = config["user_id"]
+
+        self.users = []
+        self.running = False
+        self.devices = {}
+
         print(f"[KERNEL] Geïnitialiseerd voor {self.username}@{self.hostname}")
-        
-        # 2. PAS DAARNA de UI en Thema Instellingen
+
+        # 2. UI en thema instellingen
         self.animations_enabled = True
         self.current_theme = "standard"
-        
-        # ANSI Kleurcodes database
+
         self.colors_dict = {
             "reset": "\033[0m",
             "bold": "\033[1m",
@@ -38,70 +49,90 @@ class Kernel:
             "purple": "\033[35m",
             "yellow": "\033[33m"
         }
-        
-        # De standaard opstartprompt
+
         self.custom_prompt = f"{self.username}@{self.hostname}> "
 
-    # 3. INTERNE UTILITIES
+    # 3. Interne utilities
     def loading_bar(self, total=20):
-        """Toont een visuele laadbalk in de CLI."""
         if not self.animations_enabled:
             return
+
         for i in range(total + 1):
             done = "#" * i
             left = "." * (total - i)
             percent = int((i / total) * 100)
             print(f"\rLoading: [{done}{left}] {percent}%", end="", flush=True)
             time.sleep(0.1)
+
         print()
 
     def is_raspberry_pi(self):
-        """Controleert of het besturingssysteem op een echte Raspberry Pi draait."""
         try:
             if os.path.exists("/proc/device-tree/model"):
                 with open("/proc/device-tree/model", "r") as f:
                     return "Raspberry Pi" in f.read()
         except Exception:
             pass
+
         return False
 
-    # 4. DRIVER COMMUNICATIE
+    def save_to_mac_storage(self, filename, content):
+        local_folder = os.path.expanduser("~/CLIOS_STORAGE")
+        os.makedirs(local_folder, exist_ok=True)
+
+        local_path = os.path.join(local_folder, filename)
+
+        with open(local_path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+        print(f"[SAVED LOCAL] {local_path}")
+
+        mac_user = "E.R"
+        mac_ip = "192.168.2.9"
+        mac_folder = "/Users/E.R/CLIOS_STORAGE/"
+
+        if platform.system() == "Linux":
+            try:
+                subprocess.run(["scp", local_path, f"{mac_user}@{mac_ip}:{mac_folder}"])
+                print("[SAVED MAC] Sent to Mac CLIOS_STORAGE")
+            except Exception as error:
+                print("[MAC SYNC FAILED]", error)
+
+    # 4. Driver communicatie
     def register_device(self, name, device_object):
-        """Registreert een hardware driver bij de kernel."""
         self.devices[name] = device_object
         print(f"[KERNEL] Driver '{name}' succesvol geladen.")
 
     def execute_print(self, filename):
-        """Stuurt de printopdracht door naar de geladen driver."""
         if "printer" not in self.devices:
             print("Fout: Geen printerdriver geladen in het systeem!")
             return
+
         try:
-            with open(filename, 'r') as f:
+            with open(filename, "r") as f:
                 content = f.read()
+
             printer = self.devices["printer"]
             printer.connect()
             printer.print_text(content)
+
         except FileNotFoundError:
             print(f"Fout: Bestand '{filename}' niet gevonden.")
 
-    # 5. DE CORE RUN LOOP
+    # 5. Core run loop
     def run(self):
         self.running = True
-        
-        # Nu mét self. en de laadbalk-functie bestaat hierboven weer!
+
         self.loading_bar()
         print(f"[KERNEL] CLIOS v{self.version} actief")
 
         while self.running:
-            # Nu mét de dynamische custom_prompt zodat thema's werken!
             command = input(self.custom_prompt).strip()
-            
+
             if not command:
                 continue
-                
-            # --- Vanaf hier lopen al jouw eigen elif-commando's (cp, mv, browse, etc.) verder ---
 
+            # --- Vanaf hier komen jouw if/elif commando's ---
 
             # ─────────────── BASIC COMMANDS ───────────────
             if command == "help":
@@ -374,7 +405,7 @@ x   multiplication
                 subprocess.run(["nano", file])
                     
             
-            if command.startswith("cp "):
+            elif command.startswith("cp "):
                 # 1. Haal "cp " weg aan het begin en splits de rest op de spatie
                 parts = command[3:].strip().split(" ")
                 
@@ -976,7 +1007,6 @@ x   multiplication
             # --- VENV (Toont virtual environment-info) ---
             elif command == "venv":
                 # Checkt of de omgevingsvariabele VIRTUAL_ENV bestaat
-                import os
                 venv_path = os.environ.get("VIRTUAL_ENV")
                 if venv_path:
                     print(f"[VENV] Actieve virtuele omgeving: {venv_path}")
@@ -1241,7 +1271,6 @@ x   multiplication
                 if not self.is_raspberry_pi():
                     print("Error: SPI-status is alleen beschikbaar op een Raspberry Pi.")
                 else:
-                    import os
                     if os.path.exists("/dev/spidev0.0"):
                         print("[SPI] Interface is ACTIEF (/dev/spidev0.0 gevonden).")
                     else:
@@ -1331,7 +1360,6 @@ x   multiplication
                     print("Error: Sensor-uitlezing is ontworpen voor de Raspberry Pi I/O-poorten.")
                 else:
                     print("[HARDWARE] Controleren op aangesloten 1-Wire sensoren (/sys/bus/w1/devices/)...")
-                    import os
                     if os.path.exists("/sys/bus/w1/devices/"):
                         subprocess.run(["ls", "/sys/bus/w1/devices/"])
                     else:
@@ -1376,7 +1404,6 @@ x   multiplication
 
             # --- FLASK (Start een Flask-app als 'app.py' bestaat) ---
             elif command == "flask":
-                import os
                 if not os.path.exists("app.py"):
                     print("Error: Geen 'app.py' gevonden in deze map. Maak eerst een Flask-applicatie aan.")
                 else:
@@ -1532,8 +1559,7 @@ x   multiplication
 
             # --- SNAPSHOT (Maakt een back-up momentopname van je hele CLIOS-map) ---
             elif command == "snapshot":
-                import datetime
-                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                
                 snapshot_name = f"backup/clios_snapshot_{timestamp}.tar.gz"
                 print(f"[SYSTEM] Systeemmomentopname maken: {snapshot_name}...")
                 
@@ -1626,12 +1652,7 @@ x   multiplication
 
                 keuze = input("Choose 1-3: ").strip()
 
-                import urllib.parse
-                import ssl
-                import os
-                import re
-                import time
-                from urllib.parse import urlparse, parse_qs, unquote
+
 
                 url_to_fetch = ""
                 target_name = "browse_result"
@@ -1818,7 +1839,6 @@ x   multiplication
 
             elif command == "trade":
                 import json
-                import os
                 import random
 
                 config_file = "config.json"
@@ -2095,18 +2115,273 @@ x   multiplication
                     elif keuze == "7":
                         print("[SYSTEM] Terug naar CLIOS Terminal...")
                         break
+                    
+                    
+                    
+            elif command == "mission":
+                print("\n--- CLIOS MISSION BUILDER ---")
+
+                mission_name = input("Mission name: ").strip()
+                goal = input("What do you want to build?: ").strip()
+                budget = input("Budget in euro: ").strip()
+                market = input("Market Netherlands / Europe / USA: ").strip()
+
+                if not mission_name or not goal or not budget:
+                    print("[MISSION] Missing information.")
+                    continue
+
+                trusted_shops = [
+                    "bol.com",
+                    "coolblue.nl",
+                    "megekko.nl",
+                    "azerty.nl",
+                    "conrad.nl",
+                    "kiwi-electronics.com",
+                    "tinytronics.nl",
+                    "sossolutions.nl",
+                    "reichelt.nl",
+                    "elektronicavoorjou.nl"
+                ]
+
+                blocked = [
+                    "amazon", "temu", "aliexpress", "alibaba",
+                    "wish", "banggood", "ebay", "marktplaats",
+                    "refurbished", "tweedehands"
+                ]
+
+                parts = [
+                    "processor",
+                    "moederbord",
+                    "ram geheugen",
+                    "ssd",
+                    "pc voeding",
+                    "pc behuizing"
+                ]
+
+                report = "CLIOS MISSION PRODUCT REPORT\n"
+                report += "=" * 60 + "\n"
+                report += f"Mission: {mission_name}\n"
+                report += f"Goal: {goal}\n"
+                report += f"Budget: €{budget}\n"
+                report += f"Market: {market}\n"
+                report += f"Date: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+
+                report += "RULES\n"
+                report += "- Real product links only from search results\n"
+                report += "- No Amazon / China marketplaces / second-hand\n"
+                report += "- Prefer trusted Dutch/EU shops\n\n"
+
+                headers = {
+                    "User-Agent": "Mozilla/5.0 CLIOS Mission Browser"
+                }
+
+                context = ssl._create_unverified_context()
+
+                def fetch_html(url):
+                    req = urllib.request.Request(url, headers=headers)
+                    with urllib.request.urlopen(req, timeout=12, context=context) as response:
+                        return response.read().decode("utf-8", errors="ignore")
+
+                def get_product_links(search_text, max_links=5):
+                    query = urllib.parse.quote(search_text)
+                    search_url = f"https://duckduckgo.com/html/?q={query}"
+
+                    found_links = []
+                    seen = set()
+
+                    try:
+                        html = fetch_html(search_url)
+                        raw_links = re.findall(r'href="([^"]+)"', html)
+
+                        for link in raw_links:
+                            if "uddg=" not in link:
+                                continue
+
+                            real_url = parse_qs(urlparse(link).query).get("uddg", [""])[0]
+                            real_url = unquote(real_url)
+
+                            if not real_url.startswith("http"):
+                                continue
+
+                            lower = real_url.lower()
+
+                            if any(bad in lower for bad in blocked):
+                                continue
+
+                            if not any(shop in lower for shop in trusted_shops):
+                                continue
+
+                            if real_url in seen:
+                                continue
+
+                            seen.add(real_url)
+                            found_links.append(real_url)
+
+                            if len(found_links) >= max_links:
+                                break
+
+                    except Exception as error:
+                        print("[MISSION SEARCH ERROR]", error)
+
+                    return found_links
+
+                report += "PRODUCT LINKS\n"
+                report += "=" * 60 + "\n\n"
+
+                for part in parts:
+                    print(f"[MISSION] Searching product links for: {part}")
+
+                    search_text = f"{part} {goal} kopen Nederland prijs {budget} euro"
+                    links = get_product_links(search_text)
+
+                    report += f"{part.upper()}\n"
+                    report += "-" * 40 + "\n"
+
+                    if not links:
+                        report += "No trusted product links found.\n\n"
+                    else:
+                        for index, link in enumerate(links, start=1):
+                            shop = urlparse(link).netloc.replace("www.", "")
+                            report += f"[{index}] {shop}\n"
+                            report += f"{link}\n\n"
+
+                report += "\nNOTES\n"
+                report += "- Prices are not trusted automatically yet.\n"
+                report += "- Open every link and check real stock + price manually.\n"
+                report += "- Later CLIOS can add shop-specific price scanners.\n"
+
+                safe_name = re.sub(r"[^\w\-_.]", "_", mission_name)
+
+                self.save_to_mac_storage(
+                    f"mission_{safe_name}.txt",
+                    report
+                )
+
+                print(f"\n[MISSION] Mission saved: mission_{safe_name}.txt")
+                    
+                    
+            elif command == "redeep":
+                print("\n--- CLIOS REDEEP ---")
+                topic = input("Research topic: ").strip()
+
+                if not topic:
+                    print("Missing research topic.")
+                    continue
+
+                import json
+                from collections import Counter
+
+                print("[REDEEP] Checking GitHub login...")
+
+                try:
+                    login_result = subprocess.run(
+                        ["gh", "auth", "status"],
+                        capture_output=True,
+                        text=True
+                    )
+
+                    if login_result.returncode != 0:
+                        print("[GITHUB] You are not logged in.")
+                        print("Run this first in your normal terminal:")
+                        print("gh auth login")
+                        continue
+
+                    user_json = subprocess.check_output(
+                        ["gh", "api", "user"],
+                        text=True
+                    )
+
+                    user_data = json.loads(user_json)
+                    github_user = user_data.get("login", "unknown")
+
+                    repos_json = subprocess.check_output(
+                        ["gh", "api", "user/repos", "--paginate"],
+                        text=True
+                    )
+
+                    repos = json.loads(repos_json)
+
+                    following_json = subprocess.check_output(
+                        ["gh", "api", "user/following"],
+                        text=True
+                    )
+
+                    following = json.loads(following_json)
+
+                    report = "CLIOS REDEEP REPORT\n"
+                    report += "=" * 60 + "\n"
+                    report += f"GitHub account: {github_user}\n"
+                    report += f"Topic: {topic}\n"
+                    report += f"Date: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+
+                    report += "PROFILE\n"
+                    report += f"Name: {user_data.get('name')}\n"
+                    report += f"Bio: {user_data.get('bio')}\n"
+                    report += f"Public repos: {user_data.get('public_repos')}\n"
+                    report += f"Followers: {user_data.get('followers')}\n"
+                    report += f"Following: {user_data.get('following')}\n\n"
+
+                    report += "YOUR REPOSITORIES\n"
+                    words = []
+
+                    for repo in repos[:40]:
+                        name = repo.get("name", "")
+                        desc = repo.get("description") or ""
+                        lang = repo.get("language") or "unknown"
+                        stars = repo.get("stargazers_count", 0)
+                        url = repo.get("html_url", "")
+
+                        report += f"- {name} | {lang} | ⭐ {stars}\n"
+                        report += f"  {desc}\n"
+                        report += f"  {url}\n\n"
+
+                        words += re.findall(r"[a-zA-Z]{4,}", (name + " " + desc).lower())
+
+                    report += "FOLLOWING\n"
+                    for person in following[:30]:
+                        report += f"- {person.get('login')} | {person.get('html_url')}\n"
+
+                    report += "\nKEYWORDS FROM YOUR GITHUB ACTIVITY\n"
+                    for word, count in Counter(words).most_common(25):
+                        report += f"- {word}: {count}\n"
+
+                    search_query = urllib.parse.quote(f"{topic} github tutorial blog reddit")
+
+                    report += "\nRESEARCH START LINKS\n"
+                    report += f"- GitHub search: https://github.com/search?q={urllib.parse.quote(topic)}\n"
+                    report += f"- DuckDuckGo: https://duckduckgo.com/?q={search_query}\n"
+                    report += f"- Reddit: https://www.reddit.com/search/?q={urllib.parse.quote(topic)}\n"
+
+                    report += "\nSMART SUMMARY WITHOUT AI API\n"
+                    report += "- Based on your GitHub repos, CLIOS can connect your own coding interests to this topic.\n"
+                    report += "- Open the research links and save useful sources into CLIOS_STORAGE.\n"
+                    report += "- Later this can be expanded with ranking, stars, repo activity and topic filters.\n"
+
+                    safe_name = re.sub(r"[^\w\-_.]", "_", topic)
+                    self.save_to_mac_storage(f"redeep_{safe_name}.txt", report)
+
+                    print("[REDEEP] Report created successfully.")
+
+                except FileNotFoundError:
+                    print("[ERROR] GitHub CLI is not installed.")
+                    print("Install it with:")
+                    print("brew install gh")
+                    print("Then login with:")
+                    print("gh auth login")
+
+                except Exception as error:
+                    print("[REDEEP ERROR]", error)
 
 
 
             # === PAS ALS ALLERLAATSTE HET GENERIEKE COMMANDO ===
             elif command:
                 clean_command = command.strip()
-                print(f"[SYSTEM] Uitvoeren van Linux commando: {clean_command}...")
+
+                print(f"[SYSTEM] Uitvoeren: {clean_command}")
                 try:
                     import shlex
                     parsed_args = shlex.split(clean_command)
                     subprocess.run(parsed_args)
                 except FileNotFoundError:
-                    print(f"[ERROR] Commando '{clean_command}' bestaat niet.")
-                except Exception as e:
-                    print(f"[ERROR] Fout tijdens uitvoering: {e}")
+                    print(f"[ERROR] '{clean_command}' is niet geïnstalleerd of bestaat niet op dit systeem.")
