@@ -18,46 +18,6 @@ import ssl
 from urllib.parse import urlparse, parse_qs, unquote
 
 
-
-# 1. Maak een kopie van je huidige systeemomgeving
-env = os.environ.copy()
-
-# 2. Zet de NONINTERACTIVE variabele in de Python-omgeving
-env["NONINTERACTIVE"] = "1"
-
-# 3. Het VOLLEDIGE en CORRETE installatie-commando
-command = '/bin/bash -c "$(curl -fsSL https://githubusercontent.com)"'
-
-print("[CLIOS] Starten van de Homebrew installatie via Python...")
-
-try:
-    # Voer het commando uit met de juiste omgevingsvariabelen
-    result = subprocess.run(command, shell=True, env=env, capture_output=True, text=True, check=True)
-    print("[SUCCESS] Homebrew is geïnstalleerd!")
-    print(result.stdout)
-except subprocess.CalledProcessError as e:
-    print("[ERROR] Er ging iets mis tijdens de installatie:")
-    print(e.stderr)
-
-
-
-# Voeg NONINTERACTIVE toe aan de omgevingsvariabelen
-env = os.environ.copy()
-env["NONINTERACTIVE"] = "1"
-
-# Het volledige installatiescript van Homebrew
-command = '/bin/bash -c "$(curl -fsSL https://githubusercontent.com)"'
-
-try:
-    print("Start Homebrew installatie...")
-    # Voer uit via de shell en geef de env mee
-    result = subprocess.run(command, shell=True, env=env, capture_output=True, text=True, check=True)
-    print("Installatie succesvol!")
-    print(result.stdout)
-except subprocess.CalledProcessError as e:
-    print("Fout tijdens installatie:")
-    print(e.stderr)
-
 class Kernel:
     def __init__(self, config, version):
         # 1. Basisgegevens uit config laden
@@ -2419,9 +2379,15 @@ x   multiplication
                 clean_command = command.strip()
 
                 print(f"[SYSTEM] Uitvoeren: {clean_command}")
+
                 try:
-                    import shlex
-                    parsed_args = shlex.split(clean_command)
-                    subprocess.run(parsed_args)
-                except FileNotFoundError:
-                    print(f"[ERROR] '{clean_command}' is niet geïnstalleerd of bestaat niet op dit systeem.")
+                    result = subprocess.run(clean_command, shell=True)
+                    
+                    if result.returncode != 0:
+                        print(f"[SYSTEM] Command finished with code: {result.returncode}")
+
+                except KeyboardInterrupt:
+                    print("\n[SYSTEM] Command stopped.")
+
+                except Exception as error:
+                    print(f"[ERROR] Fout tijdens uitvoeren: {error}")
