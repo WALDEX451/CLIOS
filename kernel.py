@@ -17,6 +17,30 @@ import urllib.parse
 import ssl
 from urllib.parse import urlparse, parse_qs, unquote
 
+
+
+# 1. Maak een kopie van je huidige systeemomgeving
+env = os.environ.copy()
+
+# 2. Zet de NONINTERACTIVE variabele in de Python-omgeving
+env["NONINTERACTIVE"] = "1"
+
+# 3. Het VOLLEDIGE en CORRETE installatie-commando
+command = '/bin/bash -c "$(curl -fsSL https://githubusercontent.com)"'
+
+print("[CLIOS] Starten van de Homebrew installatie via Python...")
+
+try:
+    # Voer het commando uit met de juiste omgevingsvariabelen
+    result = subprocess.run(command, shell=True, env=env, capture_output=True, text=True, check=True)
+    print("[SUCCESS] Homebrew is geïnstalleerd!")
+    print(result.stdout)
+except subprocess.CalledProcessError as e:
+    print("[ERROR] Er ging iets mis tijdens de installatie:")
+    print(e.stderr)
+
+
+
 # Voeg NONINTERACTIVE toe aan de omgevingsvariabelen
 env = os.environ.copy()
 env["NONINTERACTIVE"] = "1"
