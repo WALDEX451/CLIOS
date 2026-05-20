@@ -2,6 +2,7 @@
 import os
 import time
 import sys
+import shlex
 import hashlib
 import subprocess
 import urllib.request
@@ -52,6 +53,39 @@ class Kernel:
 
         self.custom_prompt = f"{self.username}@{self.hostname}> "
 
+
+    def run_shell(self, command):
+        try:
+            print(f"[SYSTEM] Uitvoeren: {command}")
+            result = subprocess.run(command, shell=True)
+
+            if result.returncode != 0:
+                print(f"[SYSTEM] Command finished with code: {result.returncode}")
+
+        except KeyboardInterrupt:
+            print("\n[SYSTEM] Command stopped.")
+
+        except Exception as error:
+            print(f"[ERROR] Fout tijdens uitvoeren: {error}")
+
+
+    def change_directory(self, command):
+        try:
+            parts = shlex.split(command)
+
+            if len(parts) == 1:
+                folder = "~"
+            else:
+                folder = parts[1]
+
+            folder = os.path.expanduser(folder)
+            os.chdir(folder)
+
+            print("Current directory:", os.getcwd())
+
+        except Exception as error:
+            print("Folder not found:", error)
+
     # 3. Interne utilities
     def loading_bar(self, total=20):
         if not self.animations_enabled:
@@ -87,18 +121,6 @@ class Kernel:
 
         print(f"[SAVED LOCAL] {local_path}")
 
-        mac_user = "E.R"
-        mac_ip = "192.168.2.9"
-        mac_folder = "/Users/E.R/CLIOS_STORAGE/"
-
-        if platform.system() == "Linux":
-            try:
-                subprocess.run(["scp", local_path, f"{mac_user}@{mac_ip}:{mac_folder}"])
-                print("[SAVED MAC] Sent to Mac CLIOS_STORAGE")
-            except Exception as error:
-                print("[MAC SYNC FAILED]", error)
-
-    # 4. Driver communicatie
     def register_device(self, name, device_object):
         self.devices[name] = device_object
         print(f"[KERNEL] Driver '{name}' succesvol geladen.")
@@ -119,7 +141,6 @@ class Kernel:
         except FileNotFoundError:
             print(f"Fout: Bestand '{filename}' niet gevonden.")
 
-    # 5. Core run loop
     def run(self):
         self.running = True
 
@@ -130,6 +151,44 @@ class Kernel:
             command = input(self.custom_prompt).strip()
 
             if not command:
+                continue
+            
+            if "|" in command or "&&" in command or ";" in command or ">" in command or "<" in command:
+                self.run_shell(command)
+                continue
+
+            # cd moet speciaal, anders blijft Python in dezelfde map
+            if command == "cd" or command.startswith("cd "):
+                self.change_directory(command)
+                continue
+
+            # Echte shell-dingen direct doorgeven
+            if "|" in command or "&&" in command or ";" in command or ">" in command or "<" in command:
+                self.run_shell(command)
+                continue
+
+            # Echte terminal-commando's niet zelf kapot maken
+            real_commands = [
+                "sudo", "apt", "apt-get",
+                "curl", "wget",
+                "git", "gh",
+                "ssh", "scp", "rsync",
+                "bash", "sh", "chmod", "chown",
+                "python", "python3", "pip", "pip3",
+                "nano", "vim", "vi",
+                "ls", "cat", "mkdir", "rmdir", "rm", "cp", "mv",
+                "find", "grep", "du", "df", "pwd",
+                "tar", "zip", "unzip",
+                "ping", "traceroute", "nslookup",
+                "ifconfig", "ip", "systemctl", "journalctl",
+                "ps", "top", "htop", "kill", "killall",
+                "service", "reboot", "shutdown",
+            ]
+
+            first_word = command.split(" ", 1)[0]
+
+            if first_word in real_commands:
+                self.run_shell(command)
                 continue
 
             # --- Vanaf hier komen jouw if/elif commando's ---
@@ -363,18 +422,6 @@ x   multiplication
             # ─────────────── FILES ───────────────
             elif command == "ls":
                 subprocess.run(["ls"])
-
-elif command.startswith("cd "):
-    try:
-        parts = shlex.split(command)
-        if len(parts) < 2:
-            print("Error: use 'cd <folder>'")
-        else:
-            folder = os.path.expanduser(parts[1])
-            os.chdir(folder)
-            print("Current directory:", os.getcwd())
-    except Exception as error:
-        print("Folder not found:", error)
 
             elif command.startswith("mkdir "):
                 folder = command.replace("mkdir ", "", 1)
@@ -810,14 +857,6 @@ elif command.startswith("cd "):
                     # '-avz' staat for archive mode, verbose, compressed
                     subprocess.run(["rsync", "-avz", parts[0], parts[1]])
 
-            # --- CURL ---
-            elif command.startswith("curl "):
-                url = command[5:].strip()
-                if not url:
-                    print("Error: use 'curl <url>'")
-                else:
-                    subprocess.run(["curl", url])
-
             # --- WGET ---
             elif command.startswith("wget "):
                 url = command[5:].strip()
@@ -1077,12 +1116,8 @@ elif command.startswith("cd "):
                 subprocess.run(["git", "--help"])
 
             # --- GIT CLONE ---
-            elif command.startswith("git clone "):
-                url = command[10:].strip()
-                if not url:
-                    print("Error: use 'git clone <repository_url>'")
-                else:
-                    subprocess.run(["git", "clone", url])
+            elif command.startswith("git "):
+                self.run_shell(command)
 
             # --- GIT PULL ---
             elif command == "git pull":
