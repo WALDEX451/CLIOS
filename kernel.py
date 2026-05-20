@@ -17,6 +17,22 @@ import urllib.parse
 import ssl
 from urllib.parse import urlparse, parse_qs, unquote
 
+# Voeg NONINTERACTIVE toe aan de omgevingsvariabelen
+env = os.environ.copy()
+env["NONINTERACTIVE"] = "1"
+
+# Het volledige installatiescript van Homebrew
+command = '/bin/bash -c "$(curl -fsSL https://githubusercontent.com)"'
+
+try:
+    print("Start Homebrew installatie...")
+    # Voer uit via de shell en geef de env mee
+    result = subprocess.run(command, shell=True, env=env, capture_output=True, text=True, check=True)
+    print("Installatie succesvol!")
+    print(result.stdout)
+except subprocess.CalledProcessError as e:
+    print("Fout tijdens installatie:")
+    print(e.stderr)
 
 class Kernel:
     def __init__(self, config, version):
