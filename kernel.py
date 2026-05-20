@@ -364,13 +364,17 @@ x   multiplication
             elif command == "ls":
                 subprocess.run(["ls"])
 
-            elif command.startswith("cd "):
-                folder = command.replace("cd ", "", 1)
-                try:
-                    os.chdir(folder)
-                    print("Current directory:", os.getcwd())
-                except Exception as error:
-                    print("Folder not found:", error)
+elif command.startswith("cd "):
+    try:
+        parts = shlex.split(command)
+        if len(parts) < 2:
+            print("Error: use 'cd <folder>'")
+        else:
+            folder = os.path.expanduser(parts[1])
+            os.chdir(folder)
+            print("Current directory:", os.getcwd())
+    except Exception as error:
+        print("Folder not found:", error)
 
             elif command.startswith("mkdir "):
                 folder = command.replace("mkdir ", "", 1)
