@@ -74,13 +74,18 @@ class Kernel:
             parts = shlex.split(command)
 
             if len(parts) == 1:
-                folder = "~"
+                folder = os.path.expanduser("~")
             else:
                 folder = parts[1]
 
             folder = os.path.expanduser(folder)
-            os.chdir(folder)
+            folder = os.path.abspath(folder)
 
+            if not os.path.isdir(folder):
+                print(f"Folder not found: {folder}")
+                return
+
+            os.chdir(folder)
             print("Current directory:", os.getcwd())
 
         except Exception as error:
@@ -111,6 +116,7 @@ class Kernel:
         return False
 
     def save_to_mac_storage(self, filename, content):
+        # 1. Altijd eerst lokaal opslaan op het apparaat waar CLIOS draait
         local_folder = os.path.expanduser("~/CLIOS_STORAGE")
         os.makedirs(local_folder, exist_ok=True)
 
@@ -120,6 +126,36 @@ class Kernel:
             f.write(content)
 
         print(f"[SAVED LOCAL] {local_path}")
+
+        # 2. Als CLIOS op Raspberry Pi draait: stuur bestand naar Mac via SCP
+        if self.is_raspberry_pi():
+            mac_user = self.config.get("mac_user", "")
+            mac_host = self.config.get("mac_host", "")
+            mac_folder = self.config.get("mac_folder", "~/CLIOS_STORAGE")
+
+            if not mac_user or not mac_host:
+                print("[MAC SYNC] Geen Mac ingesteld in config.json")
+                print("[MAC SYNC] Bestand staat nu alleen lokaal op de Raspberry Pi.")
+                print("[MAC SYNC] Voeg mac_user en mac_host toe aan config.json.")
+                return
+
+            remote_target = f"{mac_user}@{mac_host}:{mac_folder}/"
+
+            print(f"[MAC SYNC] Versturen naar Mac: {remote_target}")
+
+            result = subprocess.run(
+                ["scp", local_path, remote_target],
+                capture_output=True,
+                text=True
+            )
+
+            if result.returncode == 0:
+                print("[MAC SYNC] Bestand succesvol naar Mac gestuurd.")
+            else:
+                print("[MAC SYNC ERROR] Bestand kon niet naar Mac worden gestuurd.")
+                print(result.stderr)
+        else:
+            print("[MAC SYNC] CLIOS draait niet op Raspberry Pi, dus lokaal opslaan is genoeg.")
 
     def register_device(self, name, device_object):
         self.devices[name] = device_object
