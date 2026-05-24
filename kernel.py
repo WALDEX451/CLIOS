@@ -13,10 +13,13 @@ import re
 import json
 import psutil
 import platform
+from collections import defaultdict
 from datetime import datetime
 import urllib.parse
 import ssl
 from urllib.parse import urlparse, parse_qs, unquote
+
+CONFIG_FILE = "config.json"
 
 
 class Kernel:
@@ -27,6 +30,10 @@ class Kernel:
         self.username = config["username"]
         self.hostname = config["hostname"]
         self.user_id = config["user_id"]
+        self.guardian_mode = config.get("guardian_mode", True)
+        self.require_https = config.get("require_https", True)
+        self.verify_tls = config.get("verify_tls", True)
+        self.enforce_ssh_host_keys = config.get("enforce_ssh_host_keys", True)
 
         self.users = []
         self.running = False
@@ -52,6 +59,7 @@ class Kernel:
         }
 
         self.custom_prompt = f"{self.username}@{self.hostname}> "
+        self.system_name = platform.system().lower()
 
 
     def run_shell(self, command):
@@ -91,6 +99,10 @@ class Kernel:
         except Exception as error:
             print("Folder not found:", error)
 
+    def save_config(self):
+        with open(CONFIG_FILE, "w", encoding="utf-8") as file:
+            json.dump(self.config, file, indent=4)
+
     # 3. Interne utilities
     def loading_bar(self, total=20):
         if not self.animations_enabled:
@@ -114,6 +126,422 @@ class Kernel:
             pass
 
         return False
+
+    def is_linux(self):
+        return self.system_name == "linux"
+
+    def is_macos(self):
+        return self.system_name == "darwin"
+
+    def command_exists(self, command_name):
+        return subprocess.run(
+            ["sh", "-c", f"command -v {shlex.quote(command_name)} >/dev/null 2>&1"]
+        ).returncode == 0
+
+    def run_if_available(self, command_args, missing_message=None, capture_output=False, text=True):
+        if not command_args:
+            return None
+
+        executable = command_args[0]
+        if not self.command_exists(executable):
+            if missing_message:
+                print(missing_message)
+            else:
+                print(f"Command not found: {executable}")
+            return None
+
+        return subprocess.run(command_args, capture_output=capture_output, text=text)
+
+    def print_authorized_security_notice(self):
+        print("[ETHICS] Gebruik deze security-functies alleen op systemen/netwerken waar je expliciete toestemming voor hebt.")
+
+    def print_guardian_notice(self):
+        print("[GUARDIAN] De Ethische Beveiliger staat aan: HTTPS, TLS-validatie en host-key hygiene worden afgedwongen.")
+
+    def is_https_url(self, url):
+        return url.lower().startswith("https://")
+
+    def normalize_url(self, url):
+        if not url.startswith(("http://", "https://")):
+            if self.require_https:
+                return "https://" + url
+            return "http://" + url
+        return url
+
+    def guarded_url(self, url):
+        normalized = self.normalize_url(url.strip())
+        if self.guardian_mode and self.require_https and not self.is_https_url(normalized):
+            print("[GUARDIAN] Onveilige HTTP-verbinding geweigerd. Gebruik HTTPS.")
+            return None
+        return normalized
+
+    def secure_curl_base(self):
+        args = ["curl", "--fail", "--show-error", "--location", "--max-time", "15"]
+        if self.guardian_mode and self.require_https:
+            args.extend(["--proto", "=https"])
+        if self.guardian_mode and self.verify_tls:
+            args.extend(["--tlsv1.2"])
+        return args
+
+    def guarded_ssh_args(self):
+        args = []
+        if self.guardian_mode and self.enforce_ssh_host_keys:
+            args.extend([
+                "-o", "StrictHostKeyChecking=yes",
+                "-o", "UpdateHostKeys=yes",
+                "-o", "VerifyHostKeyDNS=yes",
+            ])
+        return args
+
+    def handle_guarded_command(self, command):
+        try:
+            parts = shlex.split(command)
+        except ValueError as error:
+            print(f"[GUARDIAN] Ongeldig commando: {error}")
+            return True
+
+        if not parts:
+            return True
+
+        base = parts[0]
+
+        if base == "curl":
+            url = parts[-1] if parts[1:] else ""
+            guarded = self.guarded_url(url) if url else None
+            if not guarded:
+                return True
+            safe_args = self.secure_curl_base() + parts[1:-1] + [guarded]
+            subprocess.run(safe_args)
+            return True
+
+        if base == "wget":
+            url = parts[-1] if parts[1:] else ""
+            guarded = self.guarded_url(url) if url else None
+            if not guarded:
+                return True
+            safe_args = self.secure_curl_base() + ["-O"] + parts[1:-1] + [guarded]
+            subprocess.run(safe_args)
+            return True
+
+        if base == "ssh":
+            if len(parts) < 2:
+                print("Error: use 'ssh <user@host>'")
+                return True
+            target = parts[-1]
+            print(f"[GUARDIAN] SSH hardening actief voor {target}")
+            subprocess.run(["ssh"] + self.guarded_ssh_args() + parts[1:])
+            return True
+
+        if base == "scp":
+            if len(parts) < 3:
+                print("Error: use 'scp <source> <target>'")
+                return True
+            print("[GUARDIAN] SCP hardening actief")
+            subprocess.run(["scp"] + self.guarded_ssh_args() + parts[1:])
+            return True
+
+        if base == "rsync":
+            if len(parts) < 3:
+                print("Error: use 'rsync <source> <target>'")
+                return True
+            print("[GUARDIAN] RSYNC over SSH hardening actief")
+            subprocess.run([
+                "rsync",
+                "-e",
+                "ssh " + " ".join(self.guarded_ssh_args()),
+            ] + parts[1:])
+            return True
+
+        return False
+
+    def get_default_network_interface(self):
+        if self.is_linux():
+            result = self.run_if_available(
+                ["sh", "-c", "ip route show default | awk 'NR==1 {print $5}'"],
+                capture_output=True,
+            )
+            if result and result.stdout.strip():
+                return result.stdout.strip()
+        return "en0"
+
+    def run_port_scan(self, target):
+        self.print_authorized_security_notice()
+        print(f"[SECURITY] Poortscan starten op {target}...")
+
+        if self.command_exists("nmap"):
+            subprocess.run(["nmap", "-Pn", "-T3", "--top-ports", "20", "-sV", target])
+            return
+
+        print("[SECURITY] 'nmap' niet gevonden, fallback naar beperkte netcat-scan.")
+        for port in ["21", "22", "53", "80", "123", "139", "443", "445", "3389", "8080"]:
+            result = subprocess.run(
+                ["nc", "-zv", "-w", "1", target, port],
+                capture_output=True,
+                text=True
+            )
+            if "succeeded" in result.stderr or "succeeded" in result.stdout:
+                print(f"-> Poort {port}: OPEN")
+            else:
+                print(f"-> Poort {port}: gesloten")
+
+    def run_security_audit(self):
+        self.print_authorized_security_notice()
+        print("--- CLIOS Security Audit ---")
+        print(f"Platform: {platform.platform()}")
+        print(f"Raspberry Pi: {'ja' if self.is_raspberry_pi() else 'nee'}")
+
+        if self.is_linux():
+            print("\n[AUDIT] Firewall")
+            if self.command_exists("ufw"):
+                subprocess.run(["ufw", "status", "verbose"])
+            else:
+                print("ufw niet gevonden.")
+
+            print("\n[AUDIT] Luisterende poorten")
+            if self.command_exists("ss"):
+                subprocess.run(["ss", "-tulpn"])
+            else:
+                print("'ss' niet gevonden.")
+
+            print("\n[AUDIT] Netwerkinterfaces")
+            if self.command_exists("ip"):
+                subprocess.run(["ip", "addr", "show"])
+            else:
+                print("'ip' niet gevonden.")
+
+            print("\n[AUDIT] SSH service")
+            if self.command_exists("systemctl"):
+                subprocess.run(["systemctl", "status", "ssh", "--no-pager"])
+            else:
+                print("'systemctl' niet gevonden.")
+            return
+
+        print("\n[AUDIT] macOS System Integrity Protection")
+        subprocess.run(["csrutil", "status"])
+        print("\n[AUDIT] Automatische software-updates")
+        subprocess.run(["softwareupdate", "--schedule"])
+
+    def run_wifi_audit(self):
+        self.print_authorized_security_notice()
+        print("[SECURITY] Wi-Fi audit overzicht...")
+
+        if self.is_linux():
+            interface = self.get_default_network_interface()
+            print(f"[SECURITY] Interface: {interface}")
+            if self.command_exists("iwconfig"):
+                subprocess.run(["iwconfig", interface])
+            else:
+                print("'iwconfig' niet gevonden.")
+
+            if self.command_exists("iwlist"):
+                subprocess.run(["sudo", "iwlist", interface, "scanning"])
+            else:
+                print("'iwlist' niet gevonden.")
+            return
+
+        airport_path = "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport"
+        if os.path.exists(airport_path):
+            subprocess.run([airport_path, "-I"])
+            subprocess.run([airport_path, "-s"])
+        else:
+            print("macOS airport-tool niet gevonden.")
+
+    def run_http_headers(self, target):
+        self.print_authorized_security_notice()
+        url = self.guarded_url(target)
+        if not url:
+            return
+        print(f"[SECURITY] HTTP headers ophalen voor {url}")
+        subprocess.run(self.secure_curl_base() + ["-I", url])
+
+    def run_tls_check(self, host):
+        self.print_authorized_security_notice()
+        print(f"[SECURITY] TLS check voor {host}")
+        if self.command_exists("openssl"):
+            subprocess.run([
+                "openssl", "s_client",
+                "-verify_return_error",
+                "-connect", f"{host}:443",
+                "-servername", host
+            ])
+        else:
+            print("'openssl' niet gevonden.")
+
+    def run_ssh_fingerprint(self, host):
+        self.print_authorized_security_notice()
+        print(f"[SECURITY] SSH host key fingerprint voor {host}")
+        if not self.command_exists("ssh-keyscan") or not self.command_exists("ssh-keygen"):
+            print("ssh-keyscan of ssh-keygen niet gevonden.")
+            return
+        subprocess.run(
+            ["sh", "-c", f"ssh-keyscan -T 5 {shlex.quote(host)} 2>/dev/null | ssh-keygen -lf -"]
+        )
+
+    def run_mitm_audit(self, host):
+        self.print_authorized_security_notice()
+        print(f"[GUARDIAN] MITM-audit voor {host}")
+        self.run_tls_check(host)
+        self.run_ssh_fingerprint(host)
+
+    def run_wifi_security_overview(self):
+        self.print_authorized_security_notice()
+        print("[GUARDIAN] Passieve Wi-Fi beveiligingscontrole. Er wordt niets geblokkeerd of uitgezet.")
+        self.run_wifi_audit()
+        if self.is_linux() and self.command_exists("ss"):
+            print("[GUARDIAN] Actieve verbindingen")
+            subprocess.run(["ss", "-tunap"])
+        elif self.command_exists("netstat"):
+            print("[GUARDIAN] Actieve verbindingen")
+            subprocess.run(["netstat", "-an"])
+
+    def get_default_gateway(self):
+        if self.is_linux():
+            result = self.run_if_available(
+                ["sh", "-c", "ip route show default | awk 'NR==1 {print $3}'"],
+                capture_output=True,
+            )
+            if result and result.stdout.strip():
+                return result.stdout.strip()
+        else:
+            result = self.run_if_available(
+                ["sh", "-c", "route -n get default | awk '/gateway/ {print $2}'"],
+                capture_output=True,
+            )
+            if result and result.stdout.strip():
+                return result.stdout.strip()
+        return ""
+
+    def get_arp_snapshot(self):
+        result = self.run_if_available(["arp", "-an"], capture_output=True)
+        snapshot = {}
+        if not result:
+            return snapshot
+
+        for line in result.stdout.splitlines():
+            ip_match = re.search(r"\(([^)]+)\)", line)
+            mac_match = re.search(r"at ([0-9a-fA-F:]{17}|[0-9a-fA-F-]{17})", line)
+            if ip_match and mac_match:
+                snapshot[ip_match.group(1)] = mac_match.group(1).lower().replace("-", ":")
+        return snapshot
+
+    def save_wifi_baseline(self):
+        gateway_ip = self.get_default_gateway()
+        arp_snapshot = self.get_arp_snapshot()
+        gateway_mac = arp_snapshot.get(gateway_ip, "")
+        baseline = {
+            "captured_at": datetime.now().isoformat(timespec="seconds"),
+            "gateway_ip": gateway_ip,
+            "gateway_mac": gateway_mac,
+            "arp_snapshot": arp_snapshot,
+        }
+        self.config["wifi_baseline"] = baseline
+        self.save_config()
+        print("[GUARDIAN] Wi-Fi baseline opgeslagen.")
+        print(f"gateway_ip: {gateway_ip or 'onbekend'}")
+        print(f"gateway_mac: {gateway_mac or 'onbekend'}")
+        print(f"devices: {len(arp_snapshot)}")
+
+    def compare_wifi_baseline(self):
+        baseline = self.config.get("wifi_baseline")
+        if not baseline:
+            print("[GUARDIAN] Geen Wi-Fi baseline gevonden. Gebruik eerst 'wifi-baseline'.")
+            return
+
+        current_arp = self.get_arp_snapshot()
+        current_gateway_ip = self.get_default_gateway()
+        current_gateway_mac = current_arp.get(current_gateway_ip, "")
+
+        print("[GUARDIAN] Wi-Fi baseline controle")
+        print(f"baseline gateway_ip: {baseline.get('gateway_ip', 'onbekend')}")
+        print(f"huidige gateway_ip: {current_gateway_ip or 'onbekend'}")
+
+        baseline_gateway_mac = baseline.get("gateway_mac", "")
+        if baseline_gateway_mac and current_gateway_mac and baseline_gateway_mac != current_gateway_mac:
+            print("[ALERT] Gateway MAC is veranderd. Mogelijke ARP spoofing of router-wijziging.")
+            print(f"baseline: {baseline_gateway_mac}")
+            print(f"huidig:  {current_gateway_mac}")
+        else:
+            print("[OK] Gateway MAC komt overeen met de baseline of is niet beschikbaar.")
+
+        baseline_arp = baseline.get("arp_snapshot", {})
+        new_devices = sorted(ip for ip in current_arp if ip not in baseline_arp)
+        missing_devices = sorted(ip for ip in baseline_arp if ip not in current_arp)
+        changed_devices = sorted(
+            ip for ip, mac in current_arp.items()
+            if ip in baseline_arp and baseline_arp[ip] != mac
+        )
+
+        print(f"nieuwe apparaten: {len(new_devices)}")
+        for ip in new_devices[:10]:
+            print(f" + {ip} ({current_arp[ip]})")
+
+        print(f"verdwenen apparaten: {len(missing_devices)}")
+        for ip in missing_devices[:10]:
+            print(f" - {ip} ({baseline_arp[ip]})")
+
+        print(f"gewijzigde ARP entries: {len(changed_devices)}")
+        for ip in changed_devices[:10]:
+            print(f" ! {ip}: {baseline_arp[ip]} -> {current_arp[ip]}")
+
+    def detect_portscan_signals(self, threshold=5):
+        if not self.is_linux() or not self.command_exists("ss"):
+            print("[GUARDIAN] Portscan-detectie vereist Linux met 'ss'.")
+            return
+
+        result = self.run_if_available(["ss", "-H", "-tan"], capture_output=True)
+        if not result:
+            return
+
+        remote_to_ports = defaultdict(set)
+
+        for line in result.stdout.splitlines():
+            parts = line.split()
+            if len(parts) < 5:
+                continue
+
+            state = parts[0]
+            local_addr = parts[3]
+            peer_addr = parts[4]
+
+            if state not in {"SYN-RECV", "ESTAB", "TIME-WAIT"}:
+                continue
+
+            local_port = local_addr.rsplit(":", 1)[-1]
+            peer_ip = peer_addr.rsplit(":", 1)[0]
+            peer_ip = peer_ip.strip("[]")
+
+            if peer_ip in {"127.0.0.1", "::1", "0.0.0.0", "*"}:
+                continue
+
+            if local_port.isdigit():
+                remote_to_ports[peer_ip].add(local_port)
+
+        suspicious = {
+            ip: sorted(ports, key=int)
+            for ip, ports in remote_to_ports.items()
+            if len(ports) >= threshold
+        }
+
+        if not suspicious:
+            print("[GUARDIAN] Geen duidelijke portscan-signalen gezien in de huidige connecties.")
+            return
+
+        print("[ALERT] Mogelijke scan-signalen gedetecteerd:")
+        for ip, ports in sorted(suspicious.items()):
+            print(f"{ip}: {len(ports)} doelpoorten -> {', '.join(ports[:15])}")
+
+    def set_guardian_mode(self, enabled):
+        self.guardian_mode = enabled
+        self.require_https = enabled
+        self.verify_tls = enabled
+        self.enforce_ssh_host_keys = enabled
+        self.config["guardian_mode"] = enabled
+        self.config["require_https"] = enabled
+        self.config["verify_tls"] = enabled
+        self.config["enforce_ssh_host_keys"] = enabled
+        self.save_config()
+        state = "AAN" if enabled else "UIT"
+        print(f"[GUARDIAN] De Ethische Beveiliger staat nu {state}.")
 
     def save_to_mac_storage(self, filename, content):
         # 1. Altijd eerst lokaal opslaan op het apparaat waar CLIOS draait
@@ -182,6 +610,8 @@ class Kernel:
 
         self.loading_bar()
         print(f"[KERNEL] CLIOS v{self.version} actief")
+        if self.guardian_mode:
+            self.print_guardian_notice()
 
         while self.running:
             command = input(self.custom_prompt).strip()
@@ -222,6 +652,10 @@ class Kernel:
             ]
 
             first_word = command.split(" ", 1)[0]
+
+            if first_word in ["curl", "wget", "ssh", "scp", "rsync"]:
+                if self.handle_guarded_command(command):
+                    continue
 
             if first_word in real_commands:
                 self.run_shell(command)
@@ -275,6 +709,18 @@ nano <file>         Open nano editor
 rm <file>           Delete file
 cp                  Copy files
 mv                  Move files
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SECURITY
+guardian            Show DE ETHISCHE BEVEILIGER status
+guardian seal       Apply hardened anti-MITM profile
+mitm-check <host>   Verify TLS and SSH host identity
+wifi-baseline       Save trusted Wi-Fi baseline
+wifi-check          Compare current Wi-Fi to baseline
+scan-detect         Detect passive portscan signals
+scanports <host>    Authorized port scan
+audit               Host security audit
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -772,9 +1218,15 @@ x   multiplication
             # --- WIFI SCAN (Moet BOVEN wifi staan om conflicten te voorkomen) ---
             elif command.startswith("wifi scan"):
                 print("[WIFI] Zoeken naar netwerken...")
-                # macOS specifieke airport tool locatie voor scannen
-                airport_path = "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport"
-                subprocess.run([airport_path, "-s"])
+                if self.is_linux():
+                    interface = self.get_default_network_interface()
+                    if self.command_exists("iwlist"):
+                        subprocess.run(["sudo", "iwlist", interface, "scanning"])
+                    else:
+                        print("iwlist niet gevonden.")
+                else:
+                    airport_path = "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport"
+                    subprocess.run([airport_path, "-s"])
 
             # --- WIFI CONNECT ---
             elif command.startswith("wifi connect "):
@@ -783,22 +1235,39 @@ x   multiplication
                     print("Error: use 'wifi connect <network_name>'")
                 else:
                     ssid = parts[0]
-                    # Vraagt veilig het wifi-wachtwoord in de terminal
                     password = getpass.getpass(f"Wachtwoord voor {ssid}: ")
                     print(f"[WIFI] Verbinden met {ssid}...")
-                    subprocess.run(["networksetup", "-settransparentwirelessnetworkbyname", "en0", ssid, password])
+                    if self.is_linux():
+                        if self.command_exists("nmcli"):
+                            subprocess.run(["nmcli", "dev", "wifi", "connect", ssid, "password", password])
+                        else:
+                            print("nmcli niet gevonden.")
+                    else:
+                        subprocess.run(["networksetup", "-settransparentwirelessnetworkbyname", "en0", ssid, password])
 
             # --- WIFI DISCONNECT ---
             elif command == "wifi disconnect":
                 print("[WIFI] Verbinding verbreken...")
-                # macOS truc: zet de wifi-interface even uit en aan om te verbreken
-                subprocess.run(["networksetup", "-setairportpower", "en0", "off"])
-                subprocess.run(["networksetup", "-setairportpower", "en0", "on"])
+                if self.is_linux():
+                    interface = self.get_default_network_interface()
+                    if self.command_exists("nmcli"):
+                        subprocess.run(["nmcli", "dev", "disconnect", interface])
+                    else:
+                        print("nmcli niet gevonden.")
+                else:
+                    subprocess.run(["networksetup", "-setairportpower", "en0", "off"])
+                    subprocess.run(["networksetup", "-setairportpower", "en0", "on"])
 
             # --- WIFI STATUS ---
             elif command == "wifi":
-                # Toont de huidige wifi-naam (SSID) op macOS
-                subprocess.run(["networksetup", "-getairportnetwork", "en0"])
+                if self.is_linux():
+                    interface = self.get_default_network_interface()
+                    if self.command_exists("iwconfig"):
+                        subprocess.run(["iwconfig", interface])
+                    else:
+                        print("iwconfig niet gevonden.")
+                else:
+                    subprocess.run(["networksetup", "-getairportnetwork", "en0"])
 
             # --- PING ---
             elif command.startswith("ping "):
@@ -895,13 +1364,14 @@ x   multiplication
 
             # --- WGET ---
             elif command.startswith("wget "):
-                url = command[5:].strip()
-                if not url:
+                raw_url = command[5:].strip()
+                if not raw_url:
                     print("Error: use 'wget <url>'")
                 else:
-                    # Omdat macOS standaard geen 'wget' heeft, gebruiken we curl als slimme vervanger (-O downloadt het bestand)
-                    print(f"[DOWNLOAD] Bestand downloaden van {url}...")
-                    subprocess.run(["curl", "-O", url])
+                    url = self.guarded_url(raw_url)
+                    if url:
+                        print(f"[DOWNLOAD] Bestand downloaden van {url}...")
+                        subprocess.run(self.secure_curl_base() + ["-O", url])
                     
                         # --- PS (Toont actieve processen van de huidige gebruiker) ---
             elif command == "ps":
@@ -1186,19 +1656,38 @@ x   multiplication
 
             # --- WORKSPACE (Opent de huidige map in de Finder van je iMac) ---
             elif command == "workspace":
-                print("[INFO] Werkruimte openen in Finder...")
-                # Het macOS commando 'open .' opent de huidige map visueel op je scherm
-                subprocess.run(["open", "."])
+                if self.is_macos():
+                    print("[INFO] Werkruimte openen in Finder...")
+                    subprocess.run(["open", "."])
+                elif self.command_exists("xdg-open"):
+                    print("[INFO] Werkruimte openen in bestandsbeheer...")
+                    subprocess.run(["xdg-open", "."])
+                else:
+                    print("[INFO] Geen GUI opener gevonden. Huidige map:", os.getcwd())
                 
                         # --- FIREWALL (Toont de status van de macOS Application Firewall) ---
             elif command == "firewall":
-                print("[SECURITY] macOS Firewall status controleren...")
-                subprocess.run(["/usr/libexec/ApplicationFirewall/socketfilterfw", "--getglobalstate"])
+                self.print_authorized_security_notice()
+                if self.is_linux():
+                    print("[SECURITY] Linux firewallstatus controleren...")
+                    if self.command_exists("ufw"):
+                        subprocess.run(["ufw", "status", "verbose"])
+                    else:
+                        print("ufw niet gevonden.")
+                else:
+                    print("[SECURITY] macOS Firewall status controleren...")
+                    subprocess.run(["/usr/libexec/ApplicationFirewall/socketfilterfw", "--getglobalstate"])
 
             # --- UFW (Simuleert Linux UFW firewallbeheer via macOS socketfilterfw) ---
             elif command.startswith("ufw "):
+                self.print_authorized_security_notice()
                 action = command[4:].strip()
-                if action == "enable":
+                if self.is_linux():
+                    if action in ["enable", "disable", "status"]:
+                        subprocess.run(["sudo", "ufw", action])
+                    else:
+                        print("Error: use 'ufw enable', 'ufw disable' or 'ufw status'")
+                elif action == "enable":
                     print("[SECURITY] Firewall inschakelen...")
                     subprocess.run(["sudo", "/usr/libexec/ApplicationFirewall/socketfilterfw", "--setglobalstate", "on"])
                 elif action == "disable":
@@ -1211,14 +1700,108 @@ x   multiplication
 
             # --- SCANPORTS (Scant de meest voorkomende netwerkpoorten van je eigen Mac) ---
             elif command == "scanports":
-                print("[SECURITY] Lokale poortscan starten op localhost...")
-                # Scant poorten 21, 22, 80, 443 en 8080 via de ingebouwde netcat (nc) tool
-                for port in ["21", "22", "80", "443", "8080"]:
-                    result = subprocess.run(["nc", "-zv", "-w", "1", "127.0.0.1", port], capture_output=True, text=True)
-                    if "succeeded" in result.stderr or "succeeded" in result.stdout:
-                        print(f"-> Poort {port}: OPEN")
+                self.run_port_scan("127.0.0.1")
+
+            elif command.startswith("scanports "):
+                target = command[10:].strip()
+                if not target:
+                    print("Error: use 'scanports <host>'")
+                else:
+                    self.run_port_scan(target)
+
+            elif command == "security-tools":
+                print("--- Ethical Security Tools ---")
+                for tool in ["nmap", "ufw", "ss", "ip", "iwconfig", "iwlist", "openssl", "tcpdump", "nikto"]:
+                    print(f"{tool}: {'gevonden' if self.command_exists(tool) else 'niet gevonden'}")
+
+            elif command == "guardian" or command == "guardian status":
+                print("--- DE ETHISCHE BEVEILIGER ---")
+                print(f"guardian_mode: {self.guardian_mode}")
+                print(f"require_https: {self.require_https}")
+                print(f"verify_tls: {self.verify_tls}")
+                print(f"enforce_ssh_host_keys: {self.enforce_ssh_host_keys}")
+                if self.guardian_mode:
+                    self.print_guardian_notice()
+
+            elif command == "guardian on":
+                self.set_guardian_mode(True)
+
+            elif command == "guardian off":
+                print("[GUARDIAN] Guardian uitschakelen verlaagt de netwerkbeveiliging.")
+                self.set_guardian_mode(False)
+
+            elif command == "guardian seal":
+                self.print_authorized_security_notice()
+                self.set_guardian_mode(True)
+                print("[GUARDIAN] Hardening-profiel toegepast zonder Wi-Fi of netwerkverkeer te blokkeren.")
+                self.run_wifi_security_overview()
+                self.compare_wifi_baseline()
+                self.detect_portscan_signals()
+
+            elif command.startswith("mitm-check "):
+                host = command[11:].strip()
+                if not host:
+                    print("Error: use 'mitm-check <host>'")
+                else:
+                    self.run_mitm_audit(host)
+
+            elif command.startswith("ssh-fingerprint "):
+                host = command[16:].strip()
+                if not host:
+                    print("Error: use 'ssh-fingerprint <host>'")
+                else:
+                    self.run_ssh_fingerprint(host)
+
+            elif command.startswith("recon "):
+                target = command[6:].strip()
+                if not target:
+                    print("Error: use 'recon <host>'")
+                else:
+                    self.print_authorized_security_notice()
+                    print(f"[SECURITY] Recon voor {target}")
+                    if self.command_exists("nmap"):
+                        subprocess.run(["nmap", "-Pn", "-T3", "-sn", target])
                     else:
-                        print(f"-> Poort {port}: Gesloten")
+                        subprocess.run(["ping", "-c", "4", target])
+
+            elif command.startswith("service-scan "):
+                target = command[13:].strip()
+                if not target:
+                    print("Error: use 'service-scan <host>'")
+                elif self.command_exists("nmap"):
+                    self.print_authorized_security_notice()
+                    subprocess.run(["nmap", "-Pn", "-T3", "-sV", target])
+                else:
+                    print("nmap niet gevonden. Installeer nmap voor service fingerprinting.")
+
+            elif command.startswith("http-headers "):
+                target = command[13:].strip()
+                if not target:
+                    print("Error: use 'http-headers <url-or-host>'")
+                else:
+                    self.run_http_headers(target)
+
+            elif command.startswith("tls-check "):
+                host = command[10:].strip()
+                if not host:
+                    print("Error: use 'tls-check <host>'")
+                else:
+                    self.run_tls_check(host)
+
+            elif command == "wifi-audit":
+                self.run_wifi_audit()
+
+            elif command == "wifi-baseline":
+                self.print_authorized_security_notice()
+                self.save_wifi_baseline()
+
+            elif command == "wifi-check":
+                self.print_authorized_security_notice()
+                self.compare_wifi_baseline()
+
+            elif command == "scan-detect":
+                self.print_authorized_security_notice()
+                self.detect_portscan_signals()
 
             # --- HASH (Maakt direct een SHA256-hash van een ingevoerde tekst) ---
             elif command.startswith("hash "):
@@ -1283,21 +1866,22 @@ x   multiplication
 
             # --- LOCKDOWN (Schakelt de macOS Stealth modus in voor maximale netwerkbeveiliging) ---
             elif command == "lockdown":
-                print("[SECURITY] LOCKDOWN-MODUS ACTIVEREN...")
-                print("[SECURITY] Mac onzichtbaar maken in het netwerk (Stealth Mode)...")
-                # Schakelt stealth mode in zodat je Mac niet reageert op pings van hackers
-                subprocess.run(["sudo", "/usr/libexec/ApplicationFirewall/socketfilterfw", "--setstealthmode", "on"])
-                print("[SUCCESS] CLIOS Lockdown actief. Netwerk-stealthmodus is ingeschakeld.")
+                self.print_authorized_security_notice()
+                if self.is_linux():
+                    print("[SECURITY] Passieve lockdown-analyse starten...")
+                    print("[SECURITY] Er worden geen firewallregels gezet en niets op de Wi-Fi geblokkeerd.")
+                    self.run_security_audit()
+                    self.run_wifi_security_overview()
+                    print("[SUCCESS] Passieve lockdown-analyse voltooid.")
+                else:
+                    print("[SECURITY] LOCKDOWN-MODUS ACTIVEREN...")
+                    print("[SECURITY] Passieve analyse op macOS. Geen netwerkblokkades toegepast.")
+                    self.run_security_audit()
+                    print("[SUCCESS] Passieve lockdown-analyse voltooid.")
 
             # --- AUDIT (Controleert basale veiligheidsinstellingen van je Mac-omgeving) ---
             elif command == "audit":
-                print("--- CLIOS Security System Audit ---")
-                # 1. Check de status van de SIP (System Integrity Protection) op je Mac
-                print("[AUDIT 1/2] macOS System Integrity Protection controleren:")
-                subprocess.run(["csrutil", "status"])
-                # 2. Check of updates automatisch aanstaan
-                print("\n[AUDIT 2/2] Automatische software-updates controleren:")
-                subprocess.run(["softwareupdate", "--schedule"])
+                self.run_security_audit()
                 
                         # --- BASE GPIO COMMANDO'S ---
             elif command.startswith("gpio"):
@@ -1511,7 +2095,7 @@ x   multiplication
             # --- API (Toont API-info of test een publieke JSON API via curl) ---
             elif command == "api":
                 print("[API] Testen van een openbare API (HTTP GET naar ipify.org)...")
-                subprocess.run(["curl", "https://ipify.org"])
+                subprocess.run(self.secure_curl_base() + ["https://ipify.org"])
                 print()
 
             # --- SQLITE (Opent de interactieve SQLite3 console voor een databasebestand) ---
@@ -1565,19 +2149,22 @@ x   multiplication
                 if len(parts) < 2:
                     print("Error: use 'upload <local_file> <server_url>'")
                 else:
-                    local_file, url = parts[0], parts[1]
-                    print(f"[NETWORK] Uploaden van {local_file} naar {url}...")
-                    subprocess.run(["curl", "-T", local_file, url])
+                    local_file, raw_url = parts[0], parts[1]
+                    url = self.guarded_url(raw_url)
+                    if url:
+                        print(f"[NETWORK] Uploaden van {local_file} naar {url}...")
+                        subprocess.run(self.secure_curl_base() + ["-T", local_file, url])
 
             # --- DOWNLOAD (Downloadt een bestand van het internet met een voortgangsbalk) ---
             elif command.startswith("download "):
-                url = command[9:].strip()
-                if not url:
+                raw_url = command[9:].strip()
+                if not raw_url:
                     print("Error: use 'download <url>'")
                 else:
-                    print(f"[NETWORK] Bestand downloaden van {url}...")
-                    # -O bewaart de originele bestandsnaam, -# toont een nette laadbalk van curl zelf
-                    subprocess.run(["curl", "-O", "-#", url])
+                    url = self.guarded_url(raw_url)
+                    if url:
+                        print(f"[NETWORK] Bestand downloaden van {url}...")
+                        subprocess.run(self.secure_curl_base() + ["-O", "-#", url])
                     
                         # --- REBOOT (Herstart je fysieke iMac via AppleScript) ---
             elif command == "reboot":
@@ -1634,7 +2221,7 @@ x   multiplication
 
             # --- SNAPSHOT (Maakt een back-up momentopname van je hele CLIOS-map) ---
             elif command == "snapshot":
-                
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 snapshot_name = f"backup/clios_snapshot_{timestamp}.tar.gz"
                 print(f"[SYSTEM] Systeemmomentopname maken: {snapshot_name}...")
                 
@@ -1741,8 +2328,9 @@ x   multiplication
                         print("No URL entered. Back to CLIOS.")
                         continue
 
-                    if not target_url.startswith(("http://", "https://")):
-                        target_url = "https://" + target_url
+                    target_url = self.guarded_url(target_url)
+                    if not target_url:
+                        continue
 
                     url_to_fetch = target_url
                     target_name = target_url

@@ -1,4 +1,6 @@
-config.json
+.venv/
 __pycache__/
+config.json
+clios.service
 *.pyc
 CLIOS_STORAGE/

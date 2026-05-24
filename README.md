@@ -1,6 +1,8 @@
 # CLIOS
 
 > A futuristic open-source terminal operating system built in Python for Raspberry Pi, Linux, and developer experiments.
+>
+> Hardened mode: **DE ETHISCHE BEVEILIGER** for defensive, authorized security workflows.
 
 ![Python](https://img.shields.io/badge/Python-3-blue)
 ![Status](https://img.shields.io/badge/status-active-success)
@@ -20,6 +22,7 @@ It combines:
 * Product browsing tools
 * Storage systems
 * Raspberry Pi support
+* Authorized security auditing
 * Open-source experimentation
 * Future AI integration
 
@@ -45,6 +48,7 @@ The project is focused on learning, building, experimenting, and creating a futu
 * Loading animations
 * SSH deployment support
 * GitHub update workflow
+* Ethical security recon and audit commands
 
 ---
 
@@ -85,9 +89,19 @@ cd CLIOS
 
 ### Debian / Raspberry Pi OS
 
+Plug-and-play setup:
+
+```bash
+chmod +x setup_pi.sh clios
+./setup_pi.sh
+./clios
+```
+
+Manual package list used by the setup script:
+
 ```bash
 sudo apt update
-sudo apt install python3 python3-pip -y
+sudo apt install python3 python3-pip python3-venv nmap ufw net-tools iproute2 wireless-tools iw curl openssl -y
 pip3 install rich psutil
 ```
 
@@ -105,6 +119,15 @@ python3 main.py
 
 CLIOS is designed to work on Raspberry Pi systems.
 
+After copying the repository to the Pi, setup is:
+
+```bash
+cd ~/CLIOS
+chmod +x setup_pi.sh clios
+./setup_pi.sh
+./clios
+```
+
 Example deployment:
 
 ```bash
@@ -116,7 +139,8 @@ SSH into the Pi:
 ```bash
 ssh ewout@raspberrypi
 cd ~/CLIOS
-python3 main.py
+./setup_pi.sh
+./clios
 ```
 
 ---
@@ -139,7 +163,48 @@ rmdir test
 create file.txt
 cat file.txt
 browse
+security-tools
+audit
+scanports 127.0.0.1
+recon 192.168.1.0/24
+service-scan 192.168.1.1
+wifi-audit
 ```
+
+---
+
+# Ethical Security Mode
+
+CLIOS can be used as an authorized security toolkit on Raspberry Pi and Linux systems.
+
+Included defensive workflows:
+
+* `guardian` to show hardened security posture
+* `guardian on` to enforce HTTPS/TLS/host-key hygiene
+* `guardian seal` to apply the hardened guardian profile
+* `mitm-check <host>` for TLS + SSH fingerprint verification
+* `ssh-fingerprint <host>` to inspect SSH host identity
+* `security-tools` to detect installed security utilities
+* `audit` for host firewall, listening ports and SSH posture
+* `scanports <host>` for authorized port scanning
+* `recon <host>` for basic host discovery
+* `service-scan <host>` for service fingerprinting with `nmap`
+* `http-headers <host>` for HTTP security header inspection
+* `tls-check <host>` for certificate and TLS handshake checks
+* `wifi-audit` for local wireless inspection on Raspberry Pi/Linux
+
+Use these commands only on systems and networks where you have explicit permission.
+
+---
+
+# Start And Play
+
+For Raspberry Pi the first run is now non-interactive:
+
+* `setup_pi.sh` installs packages and creates a virtual environment
+* `config.json` is generated automatically with Pi defaults
+* `./clios` starts CLIOS directly
+* `clios.service` is generated automatically if you want systemd autostart
 
 ---
 

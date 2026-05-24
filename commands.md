@@ -182,7 +182,20 @@ workspace # opent werkruimte
 ```bash
 firewall # toont firewallstatus
 ufw # beheert firewall
-scanports # scant open poorten
+guardian # toont DE ETHISCHE BEVEILIGER status
+guardian on # zet hardened mode aan
+guardian off # zet hardened mode uit
+guardian seal # forceert hardened profiel
+mitm-check <host> # controleert TLS en SSH-identiteit tegen MITM-risico
+ssh-fingerprint <host> # toont SSH host key fingerprint
+security-tools # toont beschikbare ethical hacking tools
+scanports # scant localhost
+scanports <host> # scant geautoriseerde host
+recon <host> # basic host discovery
+service-scan <host> # service fingerprinting met nmap
+http-headers <url-or-host> # inspecteert response headers
+tls-check <host> # controleert TLS en certificaat
+wifi-audit # inspecteert lokaal draadloos netwerk
 hash <text> # maakt hash
 encrypt <file> # versleutelt bestand
 decrypt <file> # ontsleutelt bestand
